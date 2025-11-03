@@ -1,8 +1,6 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 import asyncio
-
-from sqlalchemy import Column, MetaData, Table, Text
-from sqlalchemy.engine.base import Engine
+import time
 
 from mautrix.types import ContentURI
 
@@ -15,6 +13,8 @@ if TYPE_CHECKING:
 class AvatarManager:
     bot: "GitHubBot"
     _avatars: dict[str, ContentURI]
+    _etag: dict[str, Optional[str]]
+    _fetched_at: dict[str, int]
     _db: DBManager
     _lock: asyncio.Lock
 
@@ -23,26 +23,49 @@ class AvatarManager:
         self._db = bot.db
         self._lock = asyncio.Lock()
         self._avatars = {}
+        self._etag = {}
+        self._fetched_at = {}
 
     async def load_db(self) -> None:
-        self._avatars = {
-            avatar.url: ContentURI(avatar.mxc) for avatar in await self._db.get_avatars()
+        rows = await self._db.get_avatars()
+        self._avatars = {row.url: ContentURI(row.mxc) for row in rows}
+        self._etag = {row.url: getattr(row, "etag", None) for row in rows}
+        self._fetched_at = {
+            row.url: int(getattr(row, "fetched_at", 0) or 0) for row in rows
         }
 
     async def get_mxc(self, url: str) -> ContentURI:
-        try:
+        now = int(time.time())
+        if url in self._avatars and (now - self._fetched_at.get(url, 0)) < 3600:
             return self._avatars[url]
-        except KeyError:
-            pass
-        async with self.bot.http.get(url) as resp:
+
+        headers = {}
+        etag = self._etag.get(url)
+        if etag:
+            headers["If-None-Match"] = etag
+
+        async with self.bot.http.get(url, headers=headers) as resp:
+            if resp.status == 304 and url in self._avatars:
+                self._fetched_at[url] = now
+                await self._db.put_avatar(
+                    url,
+                    self._avatars[url],
+                    etag=self._etag.get(url),
+                    fetched_at=now,
+                )
+                return self._avatars[url]
+
             resp.raise_for_status()
             data = await resp.read()
+            new_etag = resp.headers.get("ETag")
+
         async with self._lock:
-            try:
+            if url in self._avatars and (now - self._fetched_at.get(url, 0)) < 3600:
                 return self._avatars[url]
-            except KeyError:
-                pass
+
             mxc = await self.bot.client.upload_media(data)
             self._avatars[url] = mxc
-            await self._db.put_avatar(url, mxc)
-        return mxc
+            self._etag[url] = new_etag
+            self._fetched_at[url] = now
+            await self._db.put_avatar(url, mxc, etag=new_etag, fetched_at=now)
+            return mxc
