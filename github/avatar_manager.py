@@ -1,6 +1,10 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
+from typing import Optional
 import asyncio
 import time
+
+from sqlalchemy import Column, MetaData, Table, Text
+from sqlalchemy.engine.base import Engine
 
 from mautrix.types import ContentURI
 
@@ -28,24 +32,24 @@ class AvatarManager:
 
     async def load_db(self) -> None:
         rows = await self._db.get_avatars()
-        self._avatars = {row.url: ContentURI(row.mxc) for row in rows}
-        self._etag = {row.url: getattr(row, "etag", None) for row in rows}
-        self._fetched_at = {
-            row.url: int(getattr(row, "fetched_at", 0) or 0) for row in rows
-        }
+        self._avatars = {avatar.url: ContentURI(avatar.mxc) for avatar in rows}
+        self._etag = {avatar.url: avatar.etag for avatar in rows}
+        self._fetched_at = {avatar.url: int(avatar.fetched_at or 0) for avatar in rows}
 
     async def get_mxc(self, url: str) -> ContentURI:
         now = int(time.time())
+        # 5 min TTL
         if url in self._avatars and (now - self._fetched_at.get(url, 0)) < 300:
             return self._avatars[url]
 
-        headers = {}
+        headers: dict[str, str] = {}
         etag = self._etag.get(url)
         if etag:
             headers["If-None-Match"] = etag
 
         async with self.bot.http.get(url, headers=headers) as resp:
             if resp.status == 304 and url in self._avatars:
+                # Unchanged: bump fetched_at and persist
                 self._fetched_at[url] = now
                 await self._db.put_avatar(
                     url,
@@ -60,6 +64,7 @@ class AvatarManager:
             new_etag = resp.headers.get("ETag")
 
         async with self._lock:
+            # Race guard with same TTL inside the lock
             if url in self._avatars and (now - self._fetched_at.get(url, 0)) < 300:
                 return self._avatars[url]
 
