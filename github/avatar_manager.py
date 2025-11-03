@@ -36,7 +36,7 @@ class AvatarManager:
 
     async def get_mxc(self, url: str) -> ContentURI:
         now = int(time.time())
-        if url in self._avatars and (now - self._fetched_at.get(url, 0)) < 3600:
+        if url in self._avatars and (now - self._fetched_at.get(url, 0)) < 300:
             return self._avatars[url]
 
         headers = {}
@@ -60,7 +60,7 @@ class AvatarManager:
             new_etag = resp.headers.get("ETag")
 
         async with self._lock:
-            if url in self._avatars and (now - self._fetched_at.get(url, 0)) < 3600:
+            if url in self._avatars and (now - self._fetched_at.get(url, 0)) < 300:
                 return self._avatars[url]
 
             mxc = await self.bot.client.upload_media(data)
