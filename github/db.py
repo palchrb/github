@@ -36,7 +36,12 @@ class Client:
     def from_row(cls, row: Record | None) -> Optional["Client"]:
         if not row:
             return None
-        return cls(user_id=row["user_id"], token=row["token"])
+        user_id = row["user_id"]
+        token = row["token"]
+        return cls(
+            user_id=user_id,
+            token=token,
+        )
 
 
 @dataclass(frozen=True)
@@ -50,11 +55,15 @@ class Avatar:
     def from_row(cls, row: Record | None) -> Optional["Avatar"]:
         if not row:
             return None
+        url = row["url"]
+        mxc = row["mxc"]
+        etag = row.get("etag")
+        fetched_at = int(row.get("fetched_at") or 0)
         return cls(
-            url=row["url"],
-            mxc=row["mxc"],
-            etag=row.get("etag"),
-            fetched_at=int(row.get("fetched_at") or 0),
+            url=url,
+            mxc=mxc,
+            etag=etag,
+            fetched_at=fetched_at,
         )
 
 
@@ -72,13 +81,18 @@ class WebhookInfo:
         if not row:
             return None
         id = row["id"]
+        repo = row["repo"]
+        user_id = row["user_id"]
+        room_id = row["room_id"]
+        github_id = row["github_id"]
+        secret = row["secret"]
         return cls(
             id=id if isinstance(id, uuid.UUID) else uuid.UUID(id),
-            repo=row["repo"],
-            user_id=row["user_id"],
-            room_id=row["room_id"],
-            github_id=row["github_id"],
-            secret=row["secret"],
+            repo=repo,
+            user_id=user_id,
+            room_id=room_id,
+            github_id=github_id,
+            secret=secret,
         )
 
     def __str__(self) -> str:
@@ -101,11 +115,15 @@ class DBManager:
             room_id,
         )
 
-    async def put_event(self, message_id: str, room_id: RoomID, event_id: EventID) -> None:
+    async def put_event(
+        self,
+        message_id: str,
+        room_id: RoomID,
+        event_id: EventID,
+    ) -> None:
         await self.db.execute(
             """
-            INSERT INTO matrix_message (message_id, room_id, event_id)
-            VALUES ($1, $2, $3)
+            INSERT INTO matrix_message (message_id, room_id, event_id) VALUES ($1, $2, $3)
             ON CONFLICT (message_id, room_id) DO UPDATE SET event_id = excluded.event_id
             """,
             message_id,
@@ -120,8 +138,7 @@ class DBManager:
     async def put_client(self, user_id: UserID, token: str) -> None:
         await self.db.execute(
             """
-            INSERT INTO client (user_id, token)
-            VALUES ($1, $2)
+            INSERT INTO client (user_id, token) VALUES ($1, $2)
             ON CONFLICT (user_id) DO UPDATE SET token = excluded.token
             """,
             user_id,
@@ -129,28 +146,23 @@ class DBManager:
         )
 
     async def delete_client(self, user_id: UserID) -> None:
-        await self.db.execute("DELETE FROM client WHERE user_id = $1", user_id)
+        await self.db.execute(
+            "DELETE FROM client WHERE user_id = $1",
+            user_id,
+        )
 
     async def get_avatars(self) -> list[Avatar]:
         rows = await self.db.fetch("SELECT url, mxc, etag, fetched_at FROM avatar")
         return [Avatar.from_row(row) for row in rows]
 
-    async def put_avatar(
-        self,
-        url: str,
-        mxc: ContentURI,
-        *,
-        etag: Optional[str] = None,
-        fetched_at: Optional[int] = None,
-    ) -> None:
+    async def put_avatar(self, url: str, mxc: ContentURI, *, etag: Optional[str] = None, fetched_at: Optional[int] = None) -> None:
         await self.db.execute(
             """
-            INSERT INTO avatar (url, mxc, etag, fetched_at)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (url) DO UPDATE
-              SET mxc = excluded.mxc,
-                  etag = excluded.etag,
-                  fetched_at = excluded.fetched_at
+            INSERT INTO avatar (url, mxc, etag, fetched_at) VALUES ($1, $2, $3, $4)
+            ON CONFLICT (url) DO UPDATE SET
+                mxc = excluded.mxc,
+                etag = excluded.etag,
+                fetched_at = excluded.fetched_at
             """,
             url,
             mxc,
@@ -158,14 +170,14 @@ class DBManager:
             fetched_at,
         )
 
-    async def get_webhook_by_id(self, id: uuid.UUID) -> Optional[WebhookInfo]:
+    async def get_webhook_by_id(self, id: uuid.UUID) -> WebhookInfo | None:
         row = await self.db.fetchrow(
             "SELECT id, repo, user_id, room_id, github_id, secret FROM webhook WHERE id = $1",
             str(id),
         )
         return WebhookInfo.from_row(row)
 
-    async def get_webhook_by_repo(self, room_id: RoomID, repo: str) -> Optional[WebhookInfo]:
+    async def get_webhook_by_repo(self, room_id: RoomID, repo: str) -> WebhookInfo | None:
         row = await self.db.fetchrow(
             "SELECT id, repo, user_id, room_id, github_id, secret FROM webhook WHERE room_id = $1 AND repo = $2",
             room_id,
@@ -181,7 +193,10 @@ class DBManager:
         return [WebhookInfo.from_row(row) for row in rows]
 
     async def delete_webhook(self, id: uuid.UUID) -> None:
-        await self.db.execute("DELETE FROM webhook WHERE id = $1", str(id))
+        await self.db.execute(
+            "DELETE FROM webhook WHERE id = $1",
+            str(id),
+        )
 
     async def insert_webhook(
         self, webhook: WebhookInfo, *, _conn: Connection | None = None
@@ -207,7 +222,11 @@ class DBManager:
         )
 
     async def transfer_webhook_repo(self, id: uuid.UUID, new_repo: str) -> None:
-        await self.db.execute("UPDATE webhook SET repo = $1 WHERE id = $2", new_repo, str(id))
+        await self.db.execute(
+            "UPDATE webhook SET repo = $1 WHERE id = $2",
+            new_repo,
+            str(id),
+        )
 
     async def transfer_webhook_rooms(self, old_room: RoomID, new_room: RoomID) -> None:
         await self.db.execute(
