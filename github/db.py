@@ -177,7 +177,6 @@ class DBManager:
             fetched_at,
         )
 
-
     async def get_webhook_by_id(self, id: uuid.UUID) -> WebhookInfo | None:
         row = await self.db.fetchrow(
             "SELECT id, repo, user_id, room_id, github_id, secret FROM webhook WHERE id = $1",
