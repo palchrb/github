@@ -155,7 +155,14 @@ class DBManager:
         rows = await self.db.fetch("SELECT url, mxc, etag, fetched_at FROM avatar")
         return [Avatar.from_row(row) for row in rows]
 
-    async def put_avatar(self, url: str, mxc: ContentURI, *, etag: Optional[str] = None, fetched_at: Optional[int] = None) -> None:
+    async def put_avatar(
+        self,
+        url: str,
+        mxc: ContentURI,
+        *,
+        etag: Optional[str] = None,
+        fetched_at: Optional[int] = None,
+    ) -> None:
         await self.db.execute(
             """
             INSERT INTO avatar (url, mxc, etag, fetched_at) VALUES ($1, $2, $3, $4)
@@ -169,6 +176,7 @@ class DBManager:
             etag,
             fetched_at,
         )
+
 
     async def get_webhook_by_id(self, id: uuid.UUID) -> WebhookInfo | None:
         row = await self.db.fetchrow(
